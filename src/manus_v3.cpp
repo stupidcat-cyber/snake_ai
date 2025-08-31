@@ -7,6 +7,10 @@
 #include <map>
 #include <queue>
 #include <set>
+#include <chrono>
+#include <random>
+#include <unordered_map>
+using namespace std;
 
 // --- 从示例代码和文档中提取的常量与结构体 ---
 
@@ -43,18 +47,35 @@ struct Snake {
     std::vector<Point> body;
     const Point& get_head() const { return body.front(); }
 };
+struct Chest {
+  Point pos;
+  int score;
+};
 
+struct Key {
+  Point pos;
+  int holder_id;
+  int remaining_time;
+};
 struct SafeZoneBounds {
     int x_min, y_min, x_max, y_max;
 };
 
 struct GameState {
-    int remaining_ticks;
-    std::vector<Item> items;
-    std::vector<Snake> snakes;
-    SafeZoneBounds current_safe_zone;
-    int self_idx;
-    const Snake& get_self() const { return snakes[self_idx]; }
+    int remaining_ticks; // 剩下的游戏刻
+  vector<Item> items; // 物品集
+  vector<Snake> snakes; // 蛇集
+  vector<Chest> chests; // 宝箱
+  vector<Key> keys; // 钥匙
+  SafeZoneBounds current_safe_zone; 
+  int next_shrink_tick; // 安全区下一次收缩时间
+  SafeZoneBounds next_safe_zone; // 下一个安全区
+  int final_shrink_tick; // 最终收缩时间
+  SafeZoneBounds final_safe_zone; // 最终形态
+
+  int self_idx; // 自己的id
+
+  const Snake &get_self() const { return snakes[self_idx]; } // 自己这条蛇
 };
 
 // --- AI 决策逻辑 ---
@@ -71,7 +92,7 @@ bool is_in_bounds(const Point& p) {
 
 bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_heads = true) {
     const auto& self = s.get_self();
-    
+    int tick_now = MAX_TICKS - s.remaining_ticks, tick_nxt = tick_now + 1;
     // 1. 撞墙
     if (!is_in_bounds(p)) {
         return true;
@@ -79,8 +100,17 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
     
     // 2. 离开安全区 (没有护盾)
     if (self.shield_time <= 0 &&
-        (p.x <= s.current_safe_zone.x_min || p.x >= s.current_safe_zone.x_max ||
-         p.y <= s.current_safe_zone.y_min || p.y >= s.current_safe_zone.y_max)) {
+        (p.x < s.current_safe_zone.x_min || p.x > s.current_safe_zone.x_max ||
+         p.y < s.current_safe_zone.y_min || p.y > s.current_safe_zone.y_max)) {
+        return true;
+    }
+
+    // 安全区开始收缩
+    if(self.shield_time<=0 && 
+        (tick_nxt == s.next_shrink_tick) && 
+        (p.x < s.next_safe_zone.x_min || p.x > s.next_safe_zone.x_max ||
+         p.y < s.next_safe_zone.y_min || p.y > s.next_safe_zone.y_max)
+    ) {
         return true;
     }
     
@@ -160,6 +190,13 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
             (neighbor.x < s.current_safe_zone.x_min || neighbor.x > s.current_safe_zone.x_max ||
              neighbor.y < s.current_safe_zone.y_min || neighbor.y > s.current_safe_zone.y_max)) {
             obstacle_count++;
+        }
+        // 到达安全区收缩时间
+        if(self.shield_time <= 0 && tick_nxt==s.next_shrink_tick && 
+            (neighbor.x < s.next_safe_zone.x_min || neighbor.x > s.next_safe_zone.x_max ||
+             neighbor.y < s.next_safe_zone.y_min || neighbor.y > s.next_safe_zone.y_max)
+        ) {
+            obstacle_count ++;
         }
     }
     
@@ -391,6 +428,7 @@ int main() {
     bool has_target = false;
 
     for (const auto& item : current_state.items) {
+        // 这里根本就不应该给陷阱被作为target的机会
         double score = evaluate_target(item.pos, item, self, current_state);
         if (score > max_item_score) {
             max_item_score = score;
@@ -422,7 +460,7 @@ int main() {
             int dist_to_target = std::abs(next_pos.y - best_target_item.pos.y) + std::abs(next_pos.x - best_target_item.pos.x);
             current_dir_score = max_item_score - dist_to_target; // 目标物品分数越高，离目标越近，分数越高
 
-            // 初步的竞争分析：如果其他蛇离目标更近，降低该方向的吸引力
+            // 初步的竞争分析：如果其他蛇离目标更近，降低该方向的吸引力xxxxx这应该在选择目标的时候就考虑
             for (const auto& other_snake : current_state.snakes) {
                 if (other_snake.id == MYID) continue;
                 int other_dist_to_target = std::abs(other_snake.get_head().y - best_target_item.pos.y) + std::abs(other_snake.get_head().x - best_target_item.pos.x);
@@ -455,7 +493,7 @@ int main() {
             
             // 此时不考虑其他蛇的头部，只考虑墙壁、自己的身体和陷阱
             // 这是一个“逃生”模式，优先寻找能活下去的方向
-            if (!is_deadly(next_pos, current_state, false)) {
+            if (!is_deadly(next_pos, current_state, true)) {
                 int safe_space = calculate_safe_space(next_pos, current_state, 5); // 评估这个方向的安全空间
                 if (safe_space > max_safe_space) {
                     max_safe_space = safe_space;
