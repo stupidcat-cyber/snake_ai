@@ -10,6 +10,7 @@
 #include <chrono>
 #include <random>
 #include <unordered_map>
+#include <time.h>
 using namespace std;
 
 // --- 从示例代码和文档中提取的常量与结构体 ---
@@ -121,7 +122,7 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
         }
     }
     
-    // 4. 检查其他蛇的身体（不包括蛇头，因为蛇头会移动）
+    // 4. 检查其他蛇
     int obstacle_count = 0; // 计算p周围有多少个障碍
     
     for (const auto& snake : s.snakes) {
@@ -132,21 +133,29 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
         
         // 检查蛇的身体（不包括尾巴，因为尾巴会移动）
         for (size_t i = 0; i < snake.body.size(); ++i) {
-            // 跳过自己的蛇身（因为蛇可以掉头）
-            if (snake.id == MYID) continue;
+            // 跳过自己的蛇身
+            if (snake.id == MYID) {
+                if(p == snake.body[i] && (i == 1 || i == 0)) // 不能走自己的脖子
+                {
+                    return true;
+                }
+            }
             
             // 跳过尾巴（会移动）
             if (i == snake.body.size() - 1) continue;
             
-            if (p == snake.body[i]) {
+            if (p == snake.body[i] && snake.id != MYID) {
                 return true; // 直接撞到身体
             }
             
             // 检查周围四个方向是否有障碍物
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
-                if (neighbor == snake.body[i]) {
+                if (neighbor == snake.body[i] && snake.id != MYID) {
                     obstacle_count++;
+                }
+                if(neighbor == snake.body[i] && snake.id == MYID && i == 0) {
+                    obstacle_count ++; // 自己的脖子也是障碍物,也就是这一秒自己的头所在的位置
                 }
             }
         }
@@ -210,12 +219,21 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
                 }
             }
         }
+        if(item.value == -5 && self.has_key == 0) {
+            for (int dir = 0; dir < 4; ++dir) {
+                Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+                if (neighbor == item.pos) {
+                    obstacle_count++;
+                }
+            }
+        }
     }
     
     // 调试输出
     // std::cerr << "Point (" << p.y << ", " << p.x << ") has " << obstacle_count << " obstacles around" << std::endl;
     
     // 如果周围有3个或以上障碍物，则认为走投无路
+    // 改为2试试
     if (obstacle_count >= 3) {
         // std::cerr << "DEAD END detected at (" << p.y << ", " << p.x << ")" << std::endl;
         return true;
@@ -343,16 +361,19 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
             score = -1e9; // 避免在不安全或过长时吃增长豆
         }
     }
-    // 陷阱 (-2) 和其他负值物品的评分为负，AI会主动避开
+    // 陷阱 (-2) 评分为负，AI会主动避开
     else if (item.value == -2) {
         score = -1e12; // 极力避免陷阱
     }
     else if (item.value == -3) { // 钥匙
-        score = 2000.0 / dist;
+        if(item.lifetime >= dist || item.lifetime==-1) {
+            score = 2000.0 / dist;;
+        }
+        else score = -1;
     }
     else if (item.value == -5) { // 宝箱
         if(self.has_key) {
-            score = 2e5 / dist*1.0;
+            score = 2e7 / dist*1.0;
         }
         else score = -1e12;
     }
@@ -451,6 +472,8 @@ int main() {
 
         // 安全性检查：使用改进后的is_deadly，考虑其他蛇的头部
         if (is_deadly(next_pos, current_state, true)) {
+            // 调试
+            // cout << dir << " is dangerous!" << endl;
             continue;
         }
 
@@ -458,7 +481,8 @@ int main() {
         double current_dir_score = 0;
         if (has_target) {
             int dist_to_target = std::abs(next_pos.y - best_target_item.pos.y) + std::abs(next_pos.x - best_target_item.pos.x);
-            current_dir_score = max_item_score - dist_to_target; // 目标物品分数越高，离目标越近，分数越高
+            // 此时目标物品已经选定，采取greedy策略
+            current_dir_score = - dist_to_target; // 目标物品分数越高，离目标越近，分数越高
 
             // 初步的竞争分析：如果其他蛇离目标更近，降低该方向的吸引力xxxxx这应该在选择目标的时候就考虑
             for (const auto& other_snake : current_state.snakes) {
@@ -491,7 +515,6 @@ int main() {
             if (self.length > 1 && dir == OPPOSITE_DIR[self.direction]) continue;
             Point next_pos = {head.y + DY[dir], head.x + DX[dir]};
             
-            // 此时不考虑其他蛇的头部，只考虑墙壁、自己的身体和陷阱
             // 这是一个“逃生”模式，优先寻找能活下去的方向
             if (!is_deadly(next_pos, current_state, true)) {
                 int safe_space = calculate_safe_space(next_pos, current_state, 5); // 评估这个方向的安全空间
@@ -506,13 +529,15 @@ int main() {
     
     // 4. 如果实在无路可走（比如被包围），随机选择一个方向（听天由命）
     if (best_dir == -1) {
-        best_dir = 0; // 默认向左
-        // 尝试选择一个非回头方向
-        for (int dir = 0; dir < 4; ++dir) {
-             if (self.length > 1 && dir == OPPOSITE_DIR[self.direction]) continue;
-             best_dir = dir;
-             break;
-        }
+        srand(time(NULL));
+        best_dir = rand() % 4;
+        while(best_dir == OPPOSITE_DIR[self.direction]) best_dir = rand() % 4;
+        if(is_deadly({head.y+DY[best_dir], head.x+DX[best_dir]}, current_state, false)) {
+            // 调试信息
+            // cout << best_dir << " is dangerous!" << endl;
+            // 试试开启护盾
+            best_dir = 4;
+        } 
     }
 
     // 输出决策并记录到Memory
