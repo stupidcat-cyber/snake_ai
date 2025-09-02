@@ -122,7 +122,7 @@ int count_obstacles(const Point& p, const GameState& s) {
         // 检查是否出界
         if (!is_in_bounds(neighbor)) {
             obstacles.insert(neighbor);
-            cout << "bound obstacles!" << endl;
+            // cout << "bound obstacles!" << endl;
             continue;
         }
         
@@ -130,7 +130,7 @@ int count_obstacles(const Point& p, const GameState& s) {
         if (self.shield_time <= 1 &&
             (neighbor.x < s.current_safe_zone.x_min || neighbor.x > s.current_safe_zone.x_max ||
              neighbor.y < s.current_safe_zone.y_min || neighbor.y > s.current_safe_zone.y_max)) {
-            cout << "possible unsafe!" << endl;
+            // cout << "possible unsafe!" << endl;
             obstacles.insert(neighbor);
         }
         // 到达安全区收缩时间, 到达这个点为tick_nxt，这个点到达周围点为tick_nxt+1
@@ -138,7 +138,7 @@ int count_obstacles(const Point& p, const GameState& s) {
             (neighbor.x < s.next_safe_zone.x_min || neighbor.x > s.next_safe_zone.x_max ||
              neighbor.y < s.next_safe_zone.y_min || neighbor.y > s.next_safe_zone.y_max)
         ) {
-            cout << "possible to hit the shrink wall!" << endl;
+            // cout << "possible to hit the shrink wall!" << endl;
             obstacles.insert(neighbor);
         }
     }
@@ -149,7 +149,7 @@ int count_obstacles(const Point& p, const GameState& s) {
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
                 if (neighbor == item.pos) {
-                    cout << "xianjing obstacles!" << endl;
+                    // cout << "xianjing obstacles!" << endl;
                     obstacles.insert(neighbor);
                 }
             }
@@ -158,14 +158,14 @@ int count_obstacles(const Point& p, const GameState& s) {
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
                 if (neighbor == item.pos) {
-                    cout << "chest obstacles!" << endl;
+                    // cout << "chest obstacles!" << endl;
                     obstacles.insert(neighbor);
                 }
             }
         }
     }
     obstacle_count = obstacles.size();
-    cout << "Point (" << p.y << ", " << p.x << ") has " << obstacle_count << " obstacles around" << std::endl;
+    // cout << "Point (" << p.y << ", " << p.x << ") has " << obstacle_count << " obstacles around" << std::endl;
     return obstacle_count;
 }
 
@@ -598,7 +598,7 @@ int main() {
         if (has_target) {
             int dist_to_target = std::abs(next_pos.y - best_target_item.pos.y) + std::abs(next_pos.x - best_target_item.pos.x);
             // 此时目标物品已经选定，采取greedy策略
-            current_dir_score = - dist_to_target*100; // 目标物品分数越高，离目标越近，分数越高
+            current_dir_score = - dist_to_target*80; // 目标物品分数越高，离目标越近，分数越高
 
             // 初步的竞争分析：如果其他蛇离目标更近，降低该方向的吸引力xxxxx这应该在选择目标的时候就考虑
             for (const auto& other_snake : current_state.snakes) {
@@ -606,7 +606,7 @@ int main() {
                 int other_dist_to_target = std::abs(other_snake.get_head().y - best_target_item.pos.y) + std::abs(other_snake.get_head().x - best_target_item.pos.x);
                 if(best_target_item.value == -5 && other_snake.has_key==0) continue; 
                 if (other_dist_to_target < dist_to_target) {
-                    current_dir_score -= (dist_to_target - other_dist_to_target) * 15; // 距离越近，惩罚越大
+                    current_dir_score -= (dist_to_target - other_dist_to_target) * 10; // 距离越近，惩罚越大
                 }
             }
         } else {
@@ -616,7 +616,7 @@ int main() {
         
         // 优先选择安全空间更大的方向，作为次要评估标准
         current_dir_score += calculate_safe_space(next_pos, current_state, 5) * 0.1; // 乘以一个小数，避免主次颠倒
-
+        current_dir_score -= count_obstacles(next_pos, current_state) * 25;
         if (current_dir_score > best_dir_score) {
             // 调试信息
             // cout << "current dir: " << dir << endl << "current score: " << current_dir_score << endl;
@@ -641,7 +641,7 @@ int main() {
             Point next_pos = {head.y + DY[dir], head.x + DX[dir]};
             
             // 这是一个“逃生”模式，优先寻找能活下去的方向
-            if (!is_deadly(next_pos, current_state, true)) {
+            if (!is_deadly(next_pos, current_state, false)) {
                 int safe_space = calculate_safe_space(next_pos, current_state, 5); // 评估这个方向的安全空间
                 if (safe_space > max_safe_space) {
                     max_safe_space = safe_space;
@@ -655,25 +655,22 @@ int main() {
     // 4. 如果实在无路可走（比如被包围），随机选择一个方向（听天由命）
     if (best_dir == -1) {
         srand(time(NULL));
-        best_dir = rand() % 4;
-        while(best_dir == OPPOSITE_DIR[self.direction] || !is_in_bounds({head.y+DY[best_dir], head.x+DX[best_dir]})) best_dir = rand() % 4;
-        if(is_deadly({head.y+DY[best_dir], head.x+DX[best_dir]}, current_state, false)) {
-            // 调试信息
-            // cout << best_dir << " is dangerous!" << endl;
-            // 试试开启护盾
-            if(self.shield_cd==0 && self.score >= 50 && current_state.remaining_ticks >= 10) {
+        if(self.shield_cd==0 && self.score >= 25 && current_state.remaining_ticks >= 40) {
                 // cout << "open shiled!" << endl;
                 best_dir = 4;
-            }
+        }
+        
             else {
                 // 调试信息
                 // cout << "can't open shiled!" << endl;
                 // cout << "choose a random dir." << endl;
                 best_dir = rand() % 4;
+                while(best_dir == OPPOSITE_DIR[self.direction]) 
+                {
+                    best_dir = rand() % 4;
+                }
             }
-        } 
     }
-
     // 输出决策并记录到Memory
     std::cout << best_dir << std::endl;
     std::cout << best_dir << std::endl; // 将本次决策作为记忆传递给下一回合
