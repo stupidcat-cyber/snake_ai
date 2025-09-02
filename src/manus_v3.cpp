@@ -625,9 +625,9 @@ int main() {
         }
         else if(current_dir_score == best_dir_score) {
             if(count_obstacles(next_pos, current_state) < count_obstacles({head.y+DY[best_dir], head.x+DX[best_dir]}, current_state)) {
-                cout << "dir " << dir << " has less obstacles! choose it as best dir." << endl;
+                // cout << "dir " << dir << " has less obstacles! choose it as best dir." << endl;
+                best_dir = dir;
             }
-            best_dir = dir;
         }
     }
 
