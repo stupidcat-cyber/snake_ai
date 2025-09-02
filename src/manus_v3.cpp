@@ -91,11 +91,92 @@ bool is_in_bounds(const Point& p) {
     return p.x >= 0 && p.x < MAXN && p.y >= 0 && p.y < MAXM;
 }
 
+int count_obstacles(const Point& p, const GameState& s) {
+    int tick_now = MAX_TICKS - s.remaining_ticks, tick_nxt = tick_now + 1;
+    const auto& self = s.get_self();
+    int obstacle_count = 0;
+    set<Point> obstacles;
+    for (const auto& snake : s.snakes) {
+        // 拥有护盾时，不会撞到其他蛇的身体
+        if (self.shield_time > 1 && snake.id != MYID) {
+            continue;
+        }
+        for (size_t i = 0; i < snake.body.size(); ++i) {
+            // 检查周围四个方向是否有障碍物
+            for (int dir = 0; dir < 4; ++dir) {
+                Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+                if (self.shield_time<=1 && neighbor == snake.body[i] && snake.id != MYID) {
+                    obstacles.insert(neighbor);
+                }
+                if(neighbor == snake.body[i] && snake.id == MYID && i == 0) {
+                    // 自己的脖子也是障碍物,也就是这一秒自己的头所在的位置
+                    obstacles.insert(neighbor);
+                }
+            }
+        }
+    }
+    // 6. 检查墙壁和安全区边界（作为障碍物）
+    for (int dir = 0; dir < 4; ++dir) {
+        Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+        
+        // 检查是否出界
+        if (!is_in_bounds(neighbor)) {
+            obstacles.insert(neighbor);
+            cout << "bound obstacles!" << endl;
+            continue;
+        }
+        
+        // 检查是否离开安全区（没有护盾时）
+        if (self.shield_time <= 1 &&
+            (neighbor.x < s.current_safe_zone.x_min || neighbor.x > s.current_safe_zone.x_max ||
+             neighbor.y < s.current_safe_zone.y_min || neighbor.y > s.current_safe_zone.y_max)) {
+            cout << "possible unsafe!" << endl;
+            obstacles.insert(neighbor);
+        }
+        // 到达安全区收缩时间, 到达这个点为tick_nxt，这个点到达周围点为tick_nxt+1
+        if(self.shield_time <= 2 && tick_nxt+1==s.next_shrink_tick && 
+            (neighbor.x < s.next_safe_zone.x_min || neighbor.x > s.next_safe_zone.x_max ||
+             neighbor.y < s.next_safe_zone.y_min || neighbor.y > s.next_safe_zone.y_max)
+        ) {
+            cout << "possible to hit the shrink wall!" << endl;
+            obstacles.insert(neighbor);
+        }
+    }
+    
+    // 7. 检查陷阱（作为障碍物）
+    for (const auto& item : s.items) {
+        if (item.value == -2) { // 陷阱
+            for (int dir = 0; dir < 4; ++dir) {
+                Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+                if (neighbor == item.pos) {
+                    cout << "xianjing obstacles!" << endl;
+                    obstacles.insert(neighbor);
+                }
+            }
+        }
+        if(item.value == -5 && self.has_key == 0) {
+            for (int dir = 0; dir < 4; ++dir) {
+                Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+                if (neighbor == item.pos) {
+                    cout << "chest obstacles!" << endl;
+                    obstacles.insert(neighbor);
+                }
+            }
+        }
+    }
+    obstacle_count = obstacles.size();
+    cout << "Point (" << p.y << ", " << p.x << ") has " << obstacle_count << " obstacles around" << std::endl;
+    return obstacle_count;
+}
+
 bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_heads = true) {
+    // 调试信息
+    // cout << "is_deadly begin to test Point" << "(" << p.y <<", "<<p.x<<")" << endl;
     const auto& self = s.get_self();
     int tick_now = MAX_TICKS - s.remaining_ticks, tick_nxt = tick_now + 1;
     // 1. 撞墙
     if (!is_in_bounds(p)) {
+        // cout << "dead because of bounds!" << endl;
         return true;
     }
     
@@ -103,11 +184,12 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
     if (self.shield_time <= 0 &&
         (p.x < s.current_safe_zone.x_min || p.x > s.current_safe_zone.x_max ||
          p.y < s.current_safe_zone.y_min || p.y > s.current_safe_zone.y_max)) {
+        // cout << "dead because of safe place!" << endl;
         return true;
     }
 
     // 安全区开始收缩
-    if(self.shield_time<=0 && 
+    if(self.shield_time<=1 && 
         (tick_nxt == s.next_shrink_tick) && 
         (p.x < s.next_safe_zone.x_min || p.x > s.next_safe_zone.x_max ||
          p.y < s.next_safe_zone.y_min || p.y > s.next_safe_zone.y_max)
@@ -120,20 +202,22 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
         if (p == item.pos && item.value == -2) {
             return true;
         }
+        if(p == item.pos && self.has_key==0 && item.value == -5) {
+            return true;
+        }
     }
     
     // 4. 检查其他蛇
     int obstacle_count = 0; // 计算p周围有多少个障碍
-    
+    set<Point> obstacles;
     for (const auto& snake : s.snakes) {
         // 拥有护盾时，不会撞到其他蛇的身体
-        if (self.shield_time > 0 && snake.id != MYID) {
+        if (self.shield_time > 1 && snake.id != MYID) {
             continue;
         }
         
-        // 检查蛇的身体（不包括尾巴，因为尾巴会移动）
+        // 检查蛇的身体
         for (size_t i = 0; i < snake.body.size(); ++i) {
-            // 跳过自己的蛇身
             if (snake.id == MYID) {
                 if(p == snake.body[i] && (i == 1 || i == 0)) // 不能走自己的脖子
                 {
@@ -142,20 +226,22 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
             }
             
             // 跳过尾巴（会移动）
-            if (i == snake.body.size() - 1) continue;
+            // if (i == snake.body.size() - 1) continue;
             
-            if (p == snake.body[i] && snake.id != MYID) {
+            if (self.shield_time < 1 && p == snake.body[i] && snake.id != MYID) {
                 return true; // 直接撞到身体
             }
             
             // 检查周围四个方向是否有障碍物
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
-                if (neighbor == snake.body[i] && snake.id != MYID) {
-                    obstacle_count++;
+                if (self.shield_time<=1 && neighbor == snake.body[i] && snake.id != MYID) {
+                    // obstacle_count++;
+                    obstacles.insert(neighbor);
                 }
                 if(neighbor == snake.body[i] && snake.id == MYID && i == 0) {
-                    obstacle_count ++; // 自己的脖子也是障碍物,也就是这一秒自己的头所在的位置
+                    // obstacle_count ++; // 自己的脖子也是障碍物,也就是这一秒自己的头所在的位置
+                    obstacles.insert(neighbor);
                 }
             }
         }
@@ -169,17 +255,17 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
             Point other_head = snake.get_head();
             for (int other_dir = 0; other_dir < 4; ++other_dir) {
                 Point other_next_pos = {other_head.y + DY[other_dir], other_head.x + DX[other_dir]};
-                if (p == other_next_pos) {
+                if (self.shield_time<=0 && p == other_next_pos) {
                     return true;
                 }
                 
                 // 检查周围是否有其他蛇的预测头部
-                for (int dir = 0; dir < 4; ++dir) {
-                    Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
-                    if (neighbor == other_next_pos) {
-                        obstacle_count++;
-                    }
-                }
+                // for (int dir = 0; dir < 4; ++dir) {
+                //     Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
+                //     if (neighbor == other_next_pos) {
+                //         obstacle_count++;
+                //     }
+                // }
             }
         }
     }
@@ -190,22 +276,25 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
         
         // 检查是否出界
         if (!is_in_bounds(neighbor)) {
-            obstacle_count++;
+            // obstacle_count++;
+            obstacles.insert(neighbor);
             continue;
         }
         
         // 检查是否离开安全区（没有护盾时）
-        if (self.shield_time <= 0 &&
+        if (self.shield_time <= 1 &&
             (neighbor.x < s.current_safe_zone.x_min || neighbor.x > s.current_safe_zone.x_max ||
              neighbor.y < s.current_safe_zone.y_min || neighbor.y > s.current_safe_zone.y_max)) {
-            obstacle_count++;
+            // obstacle_count++;
+            obstacles.insert(neighbor);
         }
-        // 到达安全区收缩时间
-        if(self.shield_time <= 0 && tick_nxt==s.next_shrink_tick && 
+        // 到达安全区收缩时间, 到达这个点为tick_nxt，这个点到达周围点为tick_nxt+1
+        if(self.shield_time <= 2 && tick_nxt+1==s.next_shrink_tick && 
             (neighbor.x < s.next_safe_zone.x_min || neighbor.x > s.next_safe_zone.x_max ||
              neighbor.y < s.next_safe_zone.y_min || neighbor.y > s.next_safe_zone.y_max)
         ) {
-            obstacle_count ++;
+            // obstacle_count ++;
+            obstacles.insert(neighbor);
         }
     }
     
@@ -215,7 +304,7 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
                 if (neighbor == item.pos) {
-                    obstacle_count++;
+                    obstacles.insert(neighbor);
                 }
             }
         }
@@ -223,12 +312,12 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
             for (int dir = 0; dir < 4; ++dir) {
                 Point neighbor = {p.y + DY[dir], p.x + DX[dir]};
                 if (neighbor == item.pos) {
-                    obstacle_count++;
+                    obstacles.insert(neighbor);
                 }
             }
         }
     }
-    
+    obstacle_count = obstacles.size();
     // 调试输出
     // std::cerr << "Point (" << p.y << ", " << p.x << ") has " << obstacle_count << " obstacles around" << std::endl;
     
@@ -356,9 +445,9 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
         if (self.length < 10 && safe_space_around_bean > 10 && !has_high_value_food) { 
             score = 80.0 / dist; // 提高增长豆的优先级
         } else if (self.length < 15 && safe_space_around_bean > 5) { 
-            score = 30.0 / dist; // 降低增长豆的优先级
+            score = 45.0 / dist; // 降低增长豆的优先级
         } else {
-            score = -1e9; // 避免在不安全或过长时吃增长豆
+            score = 25 / dist; // 避免在不安全或过长时吃增长豆
         }
     }
     // 陷阱 (-2) 评分为负，AI会主动避开
@@ -366,14 +455,14 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
         score = -1e12; // 极力避免陷阱
     }
     else if (item.value == -3) { // 钥匙
-        if(item.lifetime >= dist || item.lifetime==-1) {
+        if(self.has_key==0 && (item.lifetime >= dist || item.lifetime==-1)) {
             score = 2000.0 / dist;;
         }
-        else score = -1;
+        else score = -1e12;
     }
     else if (item.value == -5) { // 宝箱
         if(self.has_key) {
-            score = 2e7 / dist*1.0;
+            score = 2e10 / dist*1.0;
         }
         else score = -1e12;
     }
@@ -382,55 +471,74 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
 
 // --- 主程序 ---
 
-void read_game_state(GameState& s) {
-    std::cin >> s.remaining_ticks;
-    int item_count;
-    std::cin >> item_count;
-    s.items.resize(item_count);
-    for (int i = 0; i < item_count; ++i) {
-        std::cin >> s.items[i].pos.y >> s.items[i].pos.x >> s.items[i].value >> s.items[i].lifetime;
+void read_game_state(GameState &s) {
+  cin >> s.remaining_ticks;
+
+  int item_count;
+  cin >> item_count;
+  s.items.resize(item_count);
+  for (int i = 0; i < item_count; ++i) {
+    cin >> s.items[i].pos.y >> s.items[i].pos.x >>
+        s.items[i].value >> s.items[i].lifetime;
+  }
+
+  int snake_count;
+  cin >> snake_count;
+  s.snakes.resize(snake_count);
+  unordered_map<int, int> id2idx;
+  id2idx.reserve(snake_count * 2);
+
+  for (int i = 0; i < snake_count; ++i) {
+    auto &sn = s.snakes[i];
+    cin >> sn.id >> sn.length >> sn.score >> sn.direction >> sn.shield_cd >>
+        sn.shield_time;
+    sn.body.resize(sn.length);
+    for (int j = 0; j < sn.length; ++j) {
+      cin >> sn.body[j].y >> sn.body[j].x;
     }
+    if (sn.id == MYID)
+      s.self_idx = i;
+    id2idx[sn.id] = i;
+  }
 
-    int snake_count;
-    std::cin >> snake_count;
-    s.snakes.resize(snake_count);
-    std::map<int, int> id2idx;
-    for (int i = 0; i < snake_count; ++i) {
-        auto& sn = s.snakes[i];
-        std::cin >> sn.id >> sn.length >> sn.score >> sn.direction >> sn.shield_cd >> sn.shield_time;
-        sn.body.resize(sn.length);
-        for (int j = 0; j < sn.length; ++j) {
-            std::cin >> sn.body[j].y >> sn.body[j].x;
-        }
-        if (sn.id == MYID) {
-            s.self_idx = i;
-        }
-        id2idx[sn.id] = i;
+  int chest_count;
+  cin >> chest_count;
+  s.chests.resize(chest_count);
+  for (int i = 0; i < chest_count; ++i) {
+    cin >> s.chests[i].pos.y >> s.chests[i].pos.x >>
+        s.chests[i].score;
+  }
+
+  int key_count;
+  cin >> key_count;
+  s.keys.resize(key_count);
+  for (int i = 0; i < key_count; ++i) {
+    auto& key = s.keys[i];
+    cin >> key.pos.y >> key.pos.x >> key.holder_id >> key.remaining_time;
+    if (key.holder_id != -1) {
+      auto it = id2idx.find(key.holder_id);
+      if (it != id2idx.end()) {
+        s.snakes[it->second].has_key = true;
+      }
     }
-    
-    // 跳过宝箱和钥匙信息，本AI不使用
-    int chest_count, key_count;
-    std::cin >> chest_count;
-    for(int i=0; i<chest_count; ++i) { int y,x,score; std::cin >> y >> x >> score; }
-    std::cin >> key_count;
-    for(int i=0; i<key_count; ++i) { int y,x,id,time; std::cin >> y >> x >> id >> time; }
+  }
 
+  cin >> s.current_safe_zone.x_min >> s.current_safe_zone.y_min >>
+      s.current_safe_zone.x_max >> s.current_safe_zone.y_max;
+  cin >> s.next_shrink_tick >> s.next_safe_zone.x_min >>
+      s.next_safe_zone.y_min >> s.next_safe_zone.x_max >>
+      s.next_safe_zone.y_max;
+  cin >> s.final_shrink_tick >> s.final_safe_zone.x_min >>
+      s.final_safe_zone.y_min >> s.final_safe_zone.x_max >>
+      s.final_safe_zone.y_max;
 
-    std::cin >> s.current_safe_zone.x_min >> s.current_safe_zone.y_min >> s.current_safe_zone.x_max >> s.current_safe_zone.y_max;
-    
-    // 跳过未来的安全区信息
-    int next_tick, final_tick;
-    int nx_min, ny_min, nx_max, ny_max;
-    int fx_min, fy_min, fx_max, fy_max;
-    std::cin >> next_tick >> nx_min >> ny_min >> nx_max >> ny_max;
-    std::cin >> final_tick >> fx_min >> fy_min >> fx_max >> fy_max;
+  // 如果上一个 tick 往 Memory 里写入了内容，在这里读取，注意处理第一个 tick
+  // 的情况 if (s.remaining_ticks < MAX_TICKS) {
+  //     // 处理 Memory 读取
+  // }
 }
 
 int main() {
-    // 关闭C++标准流与C标准流的同步，加快IO速度
-    std::ios_base::sync_with_stdio(false);
-    std::cin.tie(NULL);
-
     GameState current_state;
     read_game_state(current_state);
 
@@ -457,6 +565,13 @@ int main() {
             has_target = true;
         }
     }
+    // 如果有钥匙，直接找宝箱
+    for (const auto& item : current_state.items) {
+        if(item.value == -5 && self.has_key) {
+            best_target_item = item;
+            has_target = true;
+        }
+    }
 
     // 2. 决策过程：根据目标和安全情况选择方向
     int best_dir = -1;
@@ -473,6 +588,7 @@ int main() {
         // 安全性检查：使用改进后的is_deadly，考虑其他蛇的头部
         if (is_deadly(next_pos, current_state, true)) {
             // 调试
+            // cout << "choose a dir!" << endl;
             // cout << dir << " is dangerous!" << endl;
             continue;
         }
@@ -482,14 +598,15 @@ int main() {
         if (has_target) {
             int dist_to_target = std::abs(next_pos.y - best_target_item.pos.y) + std::abs(next_pos.x - best_target_item.pos.x);
             // 此时目标物品已经选定，采取greedy策略
-            current_dir_score = - dist_to_target; // 目标物品分数越高，离目标越近，分数越高
+            current_dir_score = - dist_to_target*100; // 目标物品分数越高，离目标越近，分数越高
 
             // 初步的竞争分析：如果其他蛇离目标更近，降低该方向的吸引力xxxxx这应该在选择目标的时候就考虑
             for (const auto& other_snake : current_state.snakes) {
                 if (other_snake.id == MYID) continue;
                 int other_dist_to_target = std::abs(other_snake.get_head().y - best_target_item.pos.y) + std::abs(other_snake.get_head().x - best_target_item.pos.x);
+                if(best_target_item.value == -5 && other_snake.has_key==0) continue; 
                 if (other_dist_to_target < dist_to_target) {
-                    current_dir_score -= (dist_to_target - other_dist_to_target) * 50; // 距离越近，惩罚越大
+                    current_dir_score -= (dist_to_target - other_dist_to_target) * 15; // 距离越近，惩罚越大
                 }
             }
         } else {
@@ -501,7 +618,15 @@ int main() {
         current_dir_score += calculate_safe_space(next_pos, current_state, 5) * 0.1; // 乘以一个小数，避免主次颠倒
 
         if (current_dir_score > best_dir_score) {
+            // 调试信息
+            // cout << "current dir: " << dir << endl << "current score: " << current_dir_score << endl;
             best_dir_score = current_dir_score;
+            best_dir = dir;
+        }
+        else if(current_dir_score == best_dir_score) {
+            if(count_obstacles(next_pos, current_state) < count_obstacles({head.y+DY[best_dir], head.x+DX[best_dir]}, current_state)) {
+                cout << "dir " << dir << " has less obstacles! choose it as best dir." << endl;
+            }
             best_dir = dir;
         }
     }
@@ -531,12 +656,21 @@ int main() {
     if (best_dir == -1) {
         srand(time(NULL));
         best_dir = rand() % 4;
-        while(best_dir == OPPOSITE_DIR[self.direction]) best_dir = rand() % 4;
+        while(best_dir == OPPOSITE_DIR[self.direction] || !is_in_bounds({head.y+DY[best_dir], head.x+DX[best_dir]})) best_dir = rand() % 4;
         if(is_deadly({head.y+DY[best_dir], head.x+DX[best_dir]}, current_state, false)) {
             // 调试信息
             // cout << best_dir << " is dangerous!" << endl;
             // 试试开启护盾
-            best_dir = 4;
+            if(self.shield_cd==0 && self.score >= 50 && current_state.remaining_ticks >= 10) {
+                // cout << "open shiled!" << endl;
+                best_dir = 4;
+            }
+            else {
+                // 调试信息
+                // cout << "can't open shiled!" << endl;
+                // cout << "choose a random dir." << endl;
+                best_dir = rand() % 4;
+            }
         } 
     }
 
