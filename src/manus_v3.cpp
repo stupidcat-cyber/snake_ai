@@ -416,6 +416,9 @@ int calculate_safe_space(const Point& start_pos, const GameState& s, int max_dep
 
 // 评估一个目标点的分数 (改进版)
 double evaluate_target(const Point& target, const Item& item, const Snake& self, const GameState& s) {
+    if(item.pos.y < s.current_safe_zone.y_min || item.pos.y > s.current_safe_zone.y_max || item.pos.x < s.current_safe_zone.x_min || item.pos.x > s.current_safe_zone.x_max) {
+        return -1e13;
+    }
     const auto& head = self.get_head();
     int dist = std::abs(head.y - target.y) + std::abs(head.x - target.x);
     if (dist == 0) dist = 1; // 避免除以零
@@ -442,7 +445,7 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
             }
         }
 
-        if (self.length < 10 && safe_space_around_bean > 10 && !has_high_value_food) { 
+        if ((self.length < 10 && s.remaining_ticks >= 200) || (safe_space_around_bean > 10 && !has_high_value_food)) { 
             score = 100.0 / dist; // 提高增长豆的优先级
         } else if (self.length < 15 && safe_space_around_bean > 5) { 
             score = 45.0 / dist; // 降低增长豆的优先级
@@ -456,13 +459,15 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
     }
     else if (item.value == -3) { // 钥匙
         if(self.has_key==0 && (item.lifetime >= dist || item.lifetime==-1)) {
-            score = 2000.0 / dist;;
+            score = 2000.0 / dist;
+            score -= count_obstacles(item.pos, s) * 2;
         }
         else score = -1e12;
     }
     else if (item.value == -5) { // 宝箱
         if(self.has_key) {
             score = 2e10 / dist*1.0;
+            score -= count_obstacles(item.pos, s) * 10;
         }
         else score = -1e12;
     }
