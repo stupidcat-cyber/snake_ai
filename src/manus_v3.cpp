@@ -323,7 +323,7 @@ bool is_deadly(const Point& p, const GameState& s, bool consider_other_snake_hea
     
     // 如果周围有3个或以上障碍物，则认为走投无路
     // 改为2试试
-    if (obstacle_count >= 3) {
+    if (obstacle_count >= 4) {
         // std::cerr << "DEAD END detected at (" << p.y << ", " << p.x << ")" << std::endl;
         return true;
     }
@@ -347,9 +347,9 @@ int calculate_safe_space(const Point& start_pos, const GameState& s, int max_dep
         if(snake.id == MYID) continue;
         for(size_t i = 0; i < snake.body.size(); ++i) {
             // 自己的尾巴在下一刻会空出来，除非吃到增长豆
-            if (snake.id == MYID && i == snake.body.size() - 1) continue;
+            // if (snake.id == MYID && i == snake.body.size() - 1) continue;
             // 其他蛇的尾巴在下一刻会空出来，除非吃到增长豆
-            if (snake.id != MYID && i == snake.body.size() - 1) continue;
+            // if (snake.id != MYID && i == snake.body.size() - 1) continue;
             obstacles.insert(snake.body[i]);
         }
     }
@@ -364,46 +364,46 @@ int calculate_safe_space(const Point& start_pos, const GameState& s, int max_dep
 
         for (int dir = 0; dir < 4; ++dir) {
             Point next = {current.y + DY[dir], current.x + DX[dir]};
+            if(is_deadly(next, s, true)) continue;
+            // // 检查是否在地图范围内
+            // if (!is_in_bounds(next)) continue;
+            // // 检查是否在安全区内
+            // if (s.get_self().shield_time <= 0 &&
+            //     (next.x < s.current_safe_zone.x_min || next.x > s.current_safe_zone.x_max ||
+            //      next.y < s.current_safe_zone.y_min || next.y > s.current_safe_zone.y_max)) {
+            //     continue;
+            // }
+            // // 检查是否撞到陷阱
+            // bool is_trap = false;
+            // for(const auto& item : s.items) {
+            //     if (next == item.pos && item.value == -2) {
+            //         is_trap = true;
+            //         break;
+            //     }
+            // }
+            // if (is_trap) continue;
 
-            // 检查是否在地图范围内
-            if (!is_in_bounds(next)) continue;
-            // 检查是否在安全区内
-            if (s.get_self().shield_time <= 0 &&
-                (next.x < s.current_safe_zone.x_min || next.x > s.current_safe_zone.x_max ||
-                 next.y < s.current_safe_zone.y_min || next.y > s.current_safe_zone.y_max)) {
-                continue;
-            }
-            // 检查是否撞到陷阱
-            bool is_trap = false;
-            for(const auto& item : s.items) {
-                if (next == item.pos && item.value == -2) {
-                    is_trap = true;
-                    break;
-                }
-            }
-            if (is_trap) continue;
-
-            // 检查是否撞到障碍物 (包括其他蛇的身体和预测的头部)
-            bool is_obstacle = false;
-            if (obstacles.count(next)) {
-                is_obstacle = true;
-            } else {
-                // 预测其他蛇的头部位置
-                for (const auto& snake : s.snakes) {
-                    if (snake.id == MYID) continue;
-                    Point other_head = snake.get_head();
-                    for (int other_dir = 0; other_dir < 4; ++other_dir) {
-                        if (snake.length > 1 && other_dir == OPPOSITE_DIR[snake.direction]) continue;
-                        Point other_next_pos = {other_head.y + DY[other_dir], other_head.x + DX[other_dir]};
-                        if (next == other_next_pos) {
-                            is_obstacle = true;
-                            break;
-                        }
-                    }
-                    if (is_obstacle) break;
-                }
-            }
-            if (is_obstacle) continue;
+            // // 检查是否撞到障碍物 (包括其他蛇的身体和预测的头部)
+            // bool is_obstacle = false;
+            // if (obstacles.count(next)) {
+            //     is_obstacle = true;
+            // } else {
+            //     // 预测其他蛇的头部位置
+            //     for (const auto& snake : s.snakes) {
+            //         if (snake.id == MYID) continue;
+            //         Point other_head = snake.get_head();
+            //         for (int other_dir = 0; other_dir < 4; ++other_dir) {
+            //             if (snake.length > 1 && other_dir == OPPOSITE_DIR[snake.direction]) continue;
+            //             Point other_next_pos = {other_head.y + DY[other_dir], other_head.x + DX[other_dir]};
+            //             if (next == other_next_pos) {
+            //                 is_obstacle = true;
+            //                 break;
+            //             }
+            //         }
+            //         if (is_obstacle) break;
+            //     }
+            // }
+            // if (is_obstacle) continue;
 
             if (visited.find(next) == visited.end()) {
                 visited.insert(next);
@@ -443,7 +443,7 @@ double evaluate_target(const Point& target, const Item& item, const Snake& self,
         }
 
         if (self.length < 10 && safe_space_around_bean > 10 && !has_high_value_food) { 
-            score = 80.0 / dist; // 提高增长豆的优先级
+            score = 100.0 / dist; // 提高增长豆的优先级
         } else if (self.length < 15 && safe_space_around_bean > 5) { 
             score = 45.0 / dist; // 降低增长豆的优先级
         } else {
@@ -566,12 +566,12 @@ int main() {
         }
     }
     // 如果有钥匙，直接找宝箱
-    for (const auto& item : current_state.items) {
-        if(item.value == -5 && self.has_key) {
-            best_target_item = item;
-            has_target = true;
-        }
-    }
+    // for (const auto& item : current_state.items) {
+    //     if(item.value == -5 && self.has_key) {
+    //         best_target_item = item;
+    //         has_target = true;
+    //     }
+    // }
 
     // 2. 决策过程：根据目标和安全情况选择方向
     int best_dir = -1;
@@ -606,12 +606,12 @@ int main() {
                 int other_dist_to_target = std::abs(other_snake.get_head().y - best_target_item.pos.y) + std::abs(other_snake.get_head().x - best_target_item.pos.x);
                 if(best_target_item.value == -5 && other_snake.has_key==0) continue; 
                 if (other_dist_to_target < dist_to_target) {
-                    current_dir_score -= (dist_to_target - other_dist_to_target) * 10; // 距离越近，惩罚越大
+                    current_dir_score -= (dist_to_target - other_dist_to_target) * 20; // 距离越近，惩罚越大
                 }
             }
         } else {
             // 如果没有目标，就选择安全空间最大的方向
-            current_dir_score = calculate_safe_space(next_pos, current_state, 10); // 评估周围安全空间
+            current_dir_score = calculate_safe_space(next_pos, current_state, 2) * 0.9 + calculate_safe_space(next_pos, current_state, 10) * 0.1; // 评估周围安全空间
         }
         
         // 优先选择安全空间更大的方向，作为次要评估标准
